@@ -1,6 +1,6 @@
 package Lingua::EN::WSD::CorpusBased;
 
-our $VERSION = "0.10";
+our $VERSION = "0.11";
 
 use warnings;
 use strict;
@@ -17,7 +17,9 @@ sub new {
 		'hypernyms' => 1,
 		'hyponyms' => 1,
 		@_);
-
+    return -1 if (ref($args{'wnref'}) ne 'WordNet::QueryData');
+    return -1 if (ref($args{'cref'}) ne 'Lingua::EN::WSD::CorpusBased::Corpus');
+    
     my $this = { 'wn' => $args{'wnref'},
 		 'corpus' => $args{'cref'},
 		 'debug' => $args{'debug'},
@@ -39,27 +41,37 @@ sub init {
     $self->{'size'} = scalar @t;
     $self->{'inWN'} = $self->{'wn'}->queryWord($self->term,"syns");
     $self->{'wnTerm'} = crunch($self->{'stemmer'}->stemString(($self->{'inWN'}?$self->term:$self->head)));
-    if ($self->{'debug'}) {
-	print STDERR 'WSD object initialized (term="'.join(' ',@{ $self->{'term'} }).'", ';
+    if ($self->{'debug'} > 0) {
+	print STDERR 'CorpusBased object initialized (term="'.join(' ',@{ $self->{'term'} }).'", ';
 	print STDERR 'size="'.$self->{'size'}.'", ';
 	print STDERR 'inWN="'.$self->{'inWN'}.'", ';
-	print STDERR 'wnTerm="'.$self->{'wnTerm'}.'", ';
+	print STDERR 'wnTerm="'.$self->{'wnTerm'}.")\n";
     }
 }
   
+sub ready {
+    my $self = shift;
+    return 0 if (! exists($self->{'term'}));
+    return 0 if ($self->{'term'} eq '');
+    return 1;
+}
+
 sub term {
     my $self = shift;
+    return -1 if (! $self->ready);
     return lc(join("_",@{$self->{'term'}}));
 }
 
 sub head {
     my $self = shift;
+    return -1 if (! $self->ready);
     return lc($self->{'term'}->[$self->{'size'} - 1]);
 }
 
 sub term_replace {
     my $self = shift;
     my $replacement = shift;
+    return -1 if (! $self->ready);
     my @t = @{$self->{'term'}};
     pop(@t);
     push(@t,split(/_/,$replacement));
@@ -70,7 +82,7 @@ sub term_replace {
 sub synsets {
     my $self = shift;
     my %returnlist = ();
-    return [] if ($self->{'wnTerm'} eq '');
+    return [] if (! $self->ready);
     my $query = $self->{'wnTerm'};
     my @senses = $self->{'wn'}->queryWord($query,"syns");
     foreach my $word_pos (@senses) {
@@ -85,6 +97,7 @@ sub synsets {
 
 sub synonyms {
     my ($self,$synset) = @_;
+    return () if ((! defined $synset) or $synset eq '');
     return (map 
 	    { /([^\#]*)\#[nva]\#\d+/; $1 }
 	    $self->{'wn'}->querySense($synset,"syns"));
@@ -92,21 +105,27 @@ sub synonyms {
 
 sub hypernyms {
     my ($self,$synset) = @_;
+    return () if ((! defined $synset) or $synset eq '');
     return $self->{'wn'}->querySense($synset,"hype");
 }
 
 sub hyponyms {
     my ($self,$synset) = @_;
+    return () if ((! defined $synset) or $synset eq '');
     return $self->{'wn'}->querySense($synset,"hypo");
 }
 
 sub count {
     my $self = shift;
+    return -1 if ((! defined $self->{'corpus'}) or
+		  (! exists $self->{'corpus'}));
     return $self->{'corpus'}->count(@_);
 }
 
 sub v {
     my ($self,$synset) = @_;
+    return -1 if (! defined $synset or
+		  $synset eq '');
     my $sum = 0;
     foreach my $synonym ($self->synonyms($synset)) {
 	if ($self->{'inWN'}) {
@@ -150,7 +169,7 @@ sub sense {
     return [] if ($self->{'wnTerm'} eq '');
     my @maxsynsets = ();
     foreach my $synset (@{$self->synsets}) {
-	print STDERR '  '.$synset."\n" if ($self->{'debug'});
+	print STDERR '  '.$synset."\n" if ($self->{'debug'} > 0);
 	my $value = $self->v($synset)."\n";
 	if ($value > $max) {
 	    @maxsynsets = ($synset);
@@ -168,8 +187,8 @@ sub sense {
 
 sub wsd {
     my ($self,$term) = @_;
-    return undef if ($term eq '');
-    print STDERR "Doing WSD for term $term\n" if ($self->{'debug'});
+    return -1 if ($term eq '');
+    print STDERR "Doing WSD for term '$term'\n" if ($self->{'debug'} > 0);
     $self->init('term' => $term);
     return $self->sense;
 }
@@ -190,13 +209,13 @@ Lingua::EN::WSD::CorpusBased - Word Sense Disambiguation using a domain corpus
 =head1 SYNOPSIS
 
    my $wn = WordNet::QueryData->new;
-   my $corpus = Lingua::EN::WSD::CorpusBased::Corpus->new('corpus' => $corpusFile,
-                            'wnref' => $wn);
+   my $corpus = Lingua::EN::WSD::CorpusBased::Corpus->new('corpus' => '_democorpus_',
+                                                          'wnref' => $wn);
                             
    my $wsd = Lingua::EN::WSD::CorpusBased->new('wnref' => $wn,
-                      'cref' => $corpus)
-             
-   print join(', ',@{$wsd->wsd($term)});
+                                               'cref' => $corpus);
+
+   print join(', ',@{$wsd->wsd('e-mail application')}); # prints 'application#n#3'
 
 =head1 DESCRIPTION
 
@@ -227,16 +246,19 @@ B<strict>  Controls whether the algorithm returns all senses or no sense in case
 B<hyponyms>  Controls whether we use not only synonyms, but also hyponyms. Optional, default 1
 
 B<hypernyms>  Controls whether we use not only synonyms, but also hypernyms. Optional, default 1. 
+Returns a blessed reference to the object or -1 if you did not supply references to objects of WordNet::QueryData and Lingua::EN::WSD::CorpusBased::Corpus.
 
 =item wsd
 
-The method for doing the word sense disambiguation. Returns a reference to a list of senses which seem the most probable for the given term. This can be the empty list (depends on your settings for 'strict'). 
+    $obj->wsd($term);
+
+The method for doing the word sense disambiguation. Returns a reference to a list of senses which seem the most probable for the given term. This can be the empty list (depends on your settings for 'strict'). The method returns -1 if you do not provide the term to disambiguate.
 
 B<term>  The term you want to disambiguate. Required. 
 
 =item debug
 
-Returns true, if the object is in debug mode.
+Returns the debug level in which the object is currently running. 
 
 =back
 
@@ -252,43 +274,61 @@ B<term>  The term in question. Required.
 
 =item sense
 
-Internal method. Iterates over all senses of the given term and returns a reference to a list of the best senses. 
+    $obj->sense;
+
+Internal method. Iterates over all senses of the given (via init) term and returns a reference to a list of the best senses. Takes no arguments.
 
 =item v
 
-Internal method. Calculates the weight for a synset as sense of the given term. 
+    $obj->v($synset);
+
+Internal method. Calculates the weight for a synset as sense of the given term. Returns the weight or -1 if $synset is undefined or an empty string.
 
 =item count
 
-Internal method. Just a wrapper for the appropriate method of the corpus-object. Returns the number of occurrences. 
+    $obj->count(@words);
+
+Internal method. Just a wrapper for the appropriate method of the corpus-object. Returns the number of occurrences or -1 if the corpus object is not available.
 
 =item hyponyms
 
-Internal method. Returns a list of hyponyms (synsets) for a given (as argument) word.
+    $obj->hyponyms($synset);
+
+Internal method. Returns a list of hyponyms (synsets) for a given (as argument) word. If the synset argument is not provided, undefined or an empty string, the method returns an empty list. 
 
 =item hypernyms
 
-Internal method. Returns a list of hypernyms (synsets) for a given (as argument) word.
+    $obj->hypernyms($synset);
+
+Internal method. Returns a list of hypernyms (synsets) for a given (as argument) word. If the synset argument is not provided, undefined or an empty string, the method returns an empty list. 
 
 =item synonyms
 
-Internal method. Returns a list of synonyms for a word, which is given as a an argument. The returned list contains words, not synsets.
+    $obj->synonyms($synset);
+
+Internal method. Returns a list of synonyms for a synset, which is given as a an argument. The returned list contains words, not synsets. If the synset argument is not provided, undefined or an empty string, the method returns an empty list. 
 
 =item synsets
 
-Internal method. Returns a reference to a list of synsets for the given term. This list includes all possible part of speeches (as long as they are defined in WordNet). 
+    $obj->synsets($word);
+
+Internal method. Returns a reference to a list of synsets for the given term. This list includes all possible part of speeches (as long as they are defined in WordNet). Returns a reference to an empty list if something goes wrong (i.e. no term has been given to the object).
 
 =item term_replace
 
-Internal method. Returns the term in question after replacing the last word with the second argument. The returned string has underscores instead of spaces. 
+Internal method. Returns the term in question after replacing the last word with the second argument. The returned string has underscores instead of spaces. Returns -1 if no term is known to the object.
 
 =item head
 
-Internal method. Returns the grammatical head of the term. In case of multi-word expressions, this is the last word of the expression, otherwise it's the word itself. 
+Internal method. Returns the grammatical head of the term. In case of multi-word expressions, this is the last word of the expression, otherwise it's the word itself. Returns -1 if no term is given.
 
 =item term
 
-Internal method. Returns the term in question with underscores instead of spaces. 
+Internal method. Returns the term in question with underscores instead of spaces. Returns -1 if no term is given.
+
+=item ready
+
+Internal method. Returns a true value if the object is ready for disambiguation. This method especially checks if the term is set via init and if the preprocessing went ok. 
 
 =back
 
@@ -306,13 +346,13 @@ A lot more useful debug output
 
 =item *
 
-More detailed documentation
-
-=item *
-
 Making more methods externally useful, allowing a more flexible use of the module. 
 
 =back
+
+=head1 SEE ALSO
+
+It might be interesting to look at the modules L<WordNet::SenseRelate::AllWords> and L<WordNet::SenseRelate::TargetWord>, since they work in the same area. 
 
 =head1 COPYRIGHT
 

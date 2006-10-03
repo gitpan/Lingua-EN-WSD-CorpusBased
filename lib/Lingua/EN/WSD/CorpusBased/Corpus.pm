@@ -1,12 +1,16 @@
 package Lingua::EN::WSD::CorpusBased::Corpus;
 
+our $VERSION = '0.11';
+
+
 use stem;
 use warnings;
 use strict;
 
+# The demo- and test corpus
 my %democorpus = ('1' => ['hello','world'],
 		  '2' => ['application','e-mail'],
-		  '3' => ['world','subordination','masses','microsoft'],
+		  '3' => ['world','peace','love'],
 		  '4' => ['e-mail','program'],
 		  '5' => ['e-mail','job']);
 
@@ -41,7 +45,7 @@ sub new {
     };
    
     $this->{'cache'} = {};
-    print STDERR "Corpus object created.\n" if ($this->{'debug'});
+    print STDERR "Corpus object created.\n" if ($this->{'debug'} > 0);
     return bless $this, $class;
 }
 
@@ -51,27 +55,16 @@ sub init {
 	my @sentence = @{ $self->{'corpus'}->{$linenumber} };
 	foreach my $word (@sentence) {
 	    $self->{'corpusptr'}->{$word}->{$linenumber} = 1;
-	    # push(@{$self->{'corpusptr'}->{$word}}, $linenumber);
 	};
     };
     $self->{'initialized'} = 1;
-    print STDERR "Corpus object initialized.\n" if ($self->{'debug'});
-    #print STDERR main::Dumper($self->{'corpusptr'});
+    print STDERR "Corpus object initialized.\n" if ($self->{'debug'} > 0);
 }
 
-sub count {
+sub sentences {
     my $self = shift;
-    # @_ contains a list of words. 
-    # The function returns the number of sentences containing these words
     my @words = @_;
-    
-    if (exists $self->{'cache'}->{join('-',@words)}) {
-	my $c = $self->{'cache'}->{join('-',@words)};
-	print STDERR "   ".join(",",@words).": $c (cached)\n" if ($self->{'debug'});
-	return $c;
-    };
-    
-    my $c = 0;
+
     if ($self->{'initialized'}) {
 	my @gsen = keys %{$self->{'corpus'}};
 	my $good = \@gsen;
@@ -80,7 +73,29 @@ sub count {
 	    my @t = keys %{$self->{'corpusptr'}->{$word}};
 	    $good = $self->merge_lists($good, \@t);
 	};
-	$c = scalar @$good;
+	print 'Words ('.join(',',@words).') are in sentences '.join(',',@$good)."\n" 
+	    if ($self->{'debug'} > 1);
+	return @$good;
+    };
+    return ();
+}
+
+# The function returns the number of sentences containing these words
+sub count {
+    my $self = shift;
+    # @_ contains a list of words. 
+
+    my @words = @_;
+    
+    if (exists $self->{'cache'}->{join('-',@words)}) {
+	my $c = $self->{'cache'}->{join('-',@words)};
+	print STDERR "   ".join(",",@words).": $c (cached)\n" if ($self->{'debug'} > 0);
+	return $c;
+    };
+    
+    my $c = 0;
+    if ($self->{'initialized'}) {
+	$c = scalar $self->sentences(@words);
     } else {
 	foreach my $sentence (values %{$self->{'corpus'}}) {
 	    my $one = 1;
@@ -93,7 +108,7 @@ sub count {
 	};
 	
     };
-    print STDERR "   ".join(",",@words).": $c\n"  if ($self->{'debug'});
+    print STDERR "   ".join(",",@words).": $c\n"  if ($self->{'debug'} > 0);
     $self->{'cache'}->{join('-',@words)} = $c;
     return $c; 
 
@@ -127,13 +142,22 @@ __END__
 
 Lingua::EN::WSD::CorpusBased::Corpus
 
+=head1 SYNOPSIS
+
+    my $wn = WordNet::QueryData->new;
+    my $corpus = Lingua::EN::WSD::CorpusBased::Corpus->new('corpus' => '_democorpus_',
+                                                           'wnref' => $wn);
+    
+    print join(' ', @{ $corpus->line(1) });            # prints 'hello world'
+    print join(' ', @{ $corpus->sentences('hello') }); # prints '1'
+
 =head1 DESCRIPTION
 
 This module represents a corpus. Basically, it allows to extract the number of occurrences of a given word or a given word combination in a "fast" way. "fast" hereby means faster than just iterating over the lines and matching patterns. The basic access method is count(). 
 
 If one calls init() once, the module stores an internal index, which lists for every word, in which sentences it occures. 
 
-This module is a helper module for Lingua::EN::WSD::CorpusBased.
+This module is a helper module for L<Lingua::EN::WSD::CorpusBased>.
 
 =head1 METHODS
 
@@ -149,7 +173,13 @@ B<debug>  If set to a true value, the module will generate some debug informatio
 
 B<wnref>  You can supply a reference to a L<WordNet::QueryData> object. While reading the corpus, the words are then transformed to their stem forms. If you do not supply a value, the strings are used as they are in the corpus. If you supply a value other than a reference to a WordNet::QueryData object, the results are undefined (and untested ...). Optional, default: 0.
 
-B<corpus>  The name of the file containing the corpus. The method expects to find the corpus sentence by sentence, each sentence in one line. Obligatory. 
+B<corpus>  The name of the file containing the corpus. The method expects to find the corpus sentence by sentence, each sentence in one line. Obligatory. For testing purposes, one can use '_democorpus_' as filename of the corpus. In this case, no file is read but instead the internal hard-coded corpus, which is included in the module, is used:
+
+   hello world
+   application e-mail
+   world peace love
+   e-mail program
+   e-mail job
 
 Returns: A blessed reference. 
 
@@ -168,6 +198,14 @@ To make things clear: The method removes the first argument from the args list (
     count($obj, "hello", "world");
 
 is equivalent to the line above. 
+
+=item sentences
+
+This method takes the same arguments as count, namely a list of words. It then returns a list of sentences, in which each of these words occur. This method works only if init is run before, i.e. if the corpus is indexed. 
+
+=item line
+
+This method takes a number larger than 0 and returns a reference to the list of words in this line of the corpus. 
 
 =item merge_lists
 

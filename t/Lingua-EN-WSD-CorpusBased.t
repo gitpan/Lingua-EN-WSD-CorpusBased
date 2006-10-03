@@ -1,6 +1,6 @@
 #!perl -w 
 
-use Test::More tests => 7;
+use Test::More tests => 8;
 BEGIN { use_ok('Lingua::EN::WSD::CorpusBased'); };
 BEGIN { use_ok('WordNet::QueryData'); }
 
@@ -14,6 +14,7 @@ $corpus->init;
 ok($corpus, 'Creation of Lingua::EN::WSD::CorpusBased::Corpus object');
 
 ok(join('',@{$corpus->line(1)}) eq 'helloworld', 'Access-test of Corpus object');
+ok(join('',$corpus->sentences('hello')) eq '1');
 
 my $wsd = Lingua::EN::WSD::CorpusBased->new('cref' => $corpus,
 					    'wnref' => $wn);
